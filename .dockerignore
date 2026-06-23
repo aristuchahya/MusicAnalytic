@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Tests
+test*.py
+!test
+
+# Config & secrets (loaded at runtime or via environment)
+config.yaml
+service_account.json
+*.pem
+*.key
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+
+# Deployment (not needed in image)
+deployment/
+
+# Documentation
+README.md

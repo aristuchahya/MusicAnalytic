@@ -1,0 +1,166 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: yt-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - yt-network
+
+  # ------------------------------------------------------------------
+  # Kafka Broker — single node for local development
+  # ------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: yt-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      # Listeners:
+      #   INTERNAL — for services inside docker network
+      #   EXTERNAL — for your app running on the host machine
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # Auto-create topics (set to false in prod)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+      # Default replication factor = 1 (only 1 broker)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "9092:9092"    # external (host machine)
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - yt-network
+
+  # ------------------------------------------------------------------
+  # Redis — caching layer
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: yt-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --bind 0.0.0.0
+      --protected-mode no
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - yt-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: yt-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8080:8080"
+    networks:
+      - yt-network
+
+  # ------------------------------------------------------------------
+  # Grafana — Dashboard untuk BigQuery Gold Layer
+  # ------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: yt-grafana
+    restart: unless-stopped
+    environment:
+      GF_INSTALL_PLUGINS: google-bigquery-datasource
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_USERS_DEFAULT_THEME: dark
+      # BigQuery datasource env vars (dari .env file)
+      BQ_PROJECT: ${BQ_PROJECT}
+      BQ_CLIENT_EMAIL: ${BQ_CLIENT_EMAIL}
+      BQ_PRIVATE_KEY: ${BQ_PRIVATE_KEY}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/datasources/bigquery.yml:/etc/grafana/provisioning/datasources/bigquery.yml
+      - ./grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./grafana/dashboards/music-analytics-gold.json:/etc/grafana/provisioning/dashboards/music-analytics-gold.json
+    networks:
+      - yt-network
+
+  music-crawler:
+    build: .
+    container_name: yt-music-crawler
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # argparse: global args must come before subcommand
+    command:
+      - --destination=kafka
+      - --bootstrap-servers=kafka:29092
+      - crawler
+      - --mode=music
+    volumes:
+      - ./config.ini:/app/config.ini:ro
+      - ./downloads:/app/downloads
+    restart: "no"
+    networks:
+      - yt-network
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  redis-data:
+  grafana-data:
+
+networks:
+  yt-network:
+    driver: bridge

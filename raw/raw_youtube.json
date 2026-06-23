@@ -1,0 +1,26 @@
+{
+	"items": {
+		"id": {
+			"videoId": "-f3g8YFoOtg"
+		},
+		"snippet": {
+			"title": "Siine feat. Frank Moody - Be Free With Me",
+			"channelTitle": "Epidemic Pop",
+			"channelId": "UCzMxEa-lDX2AfgotszScOFg",
+			"publishedAt": "8 years ago",
+			"thumbnails": {
+				"default": {
+					"url": "https://i.ytimg.com/vi/-f3g8YFoOtg/hq720.jpg?sqp=-oaymwEnCNAFEJQDSFryq4qpAxkIARUAAIhCGAHYAQHiAQoIGBACGAY4AUAB&rs=AOn4CLBvbHrNEP0yIMOAa_BnalqKVN-QyQ"
+				}
+			},
+			"artist": "Siine",
+			"song_name": "BE FREE"
+		},
+		"statistics": {
+			"viewCount": "2,408,066 views"
+		},
+		"contentDetails": {
+			"duration": "3:03"
+		}
+	}
+}

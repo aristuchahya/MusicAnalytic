@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: smart-crawler
+    kind: se-ingest-sidatuk-worker-v1
+  name: se-ingest-sidatuk-worker-v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smart-crawler
+      kind: se-ingest-sidatuk-worker-v1
+  template:
+    metadata:
+      labels:
+        app: smart-crawler
+        kind: se-ingest-sidatuk-worker-v1
+    spec:
+      hostAliases:
+        - ip: "192.168.24.201"
+          hostnames:
+            - "kafka01.production02.bt"
+        - ip: "192.168.24.202"
+          hostnames:
+            - "kafka02.production02.bt"
+        - ip: "192.168.24.203"
+          hostnames:
+            - "kafka03.production02.bt"
+        - ip: "192.168.24.204"
+          hostnames:
+            - "kafka04.production02.bt"
+        - ip: "192.168.24.205"
+          hostnames:
+            - "kafka05.production02.bt"
+        - ip: "192.168.24.206"
+          hostnames:
+            - "kafka06.production02.bt"
+        - ip: "192.168.180.31"
+          hostnames:
+            - "kafka01.prod.bt"
+        - ip: "192.168.180.32"
+          hostnames:
+            - "kafka02.prod.bt"
+        - ip: "192.168.180.33"
+          hostnames:
+            - "kafka03.prod.bt"
+        - ip: "192.168.180.34"
+          hostnames:
+            - "kafka04.prod.bt"
+      imagePullSecrets:
+        - name: registryclipperndc
+      containers:
+        - name: se-ingest-sidatuk-worker-v1
+          image: registry.blackeye.id/crawler/smart-crawler/se-ingest-sidatuk-worker-v1:0.0.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - crawler
+            - "--mode=sidatuk"
+          resources:
+            limits:
+              cpu: "3"
+              memory: "3Gi"
+            requests:
+              cpu: "128m"
+              memory: "256Mi"
+          volumeMounts:
+            - mountPath: /app/config.ini
+              name: config
+              subPath: config.ini
+            - mountPath: /app/rabbitmq.yaml
+              name: config
+              subPath: rabbitmq
+            - mountPath: /app/logging.yaml
+              name: config
+              subPath: logging.yaml
+
+      volumes:
+        - configMap:
+            name: config-se-ingest-sidatuk-v1
+          name: config
+

@@ -1,0 +1,31 @@
+{
+    "link": "https://www.idx.co.id/en/listed-companies/company-profiles/FAST",
+    "tags": [
+        "www.idx.co.id",
+        "statistik",
+        "swasta"
+    ],
+    "source": "www.idx.co.id",
+    "title": "Data Perdagangan Saham Perusahaan Tercatat di Bursa Efek Indonesia",
+    "sub_title": null,
+    "range_data": null,
+    "create_date": 1775794107,
+    "update_date": 1775794107,
+    "description": null,
+    "category": "Keuangan",
+    "sub_category": null,
+    "path_data": "sc-company-idx-trading",
+    "path": [
+        "sc-company-idx-trading"
+    ],
+    "crawling_time": 1775794107,
+    "region": "Indonesia",
+    "level": "Nasional",
+    "stage": "Crawling data",
+    "schedule_interval": "daily",
+    "crawl_method": "API",
+    "content_type": [
+        "json"
+    ],
+    "file_size": 0
+}

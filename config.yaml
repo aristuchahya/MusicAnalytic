@@ -1,0 +1,15 @@
+project:
+  name: se-ingest-idx
+  pic: aristu
+  deployment_base_dir: deployment/idx
+  docker:
+    image:
+      name: se-ingest-idx
+    registry:
+      address: registry.blackeye.id
+      protocol: http
+      credential: harbor-credentials
+    namespace: clipper/smart-crawler
+  kubernetes:
+    cluster: ph
+    namespace: de-pipeline

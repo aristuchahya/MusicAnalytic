@@ -1,0 +1,564 @@
+// =============================================================================
+// ERD Medallion Architecture — Music Publishing Data Pipeline
+// =============================================================================
+// Bronze (Raw Ingestion) → Silver (Cleaned & Validated) → Gold (Business Views)
+//
+// Sumber Data:
+//   1. Spotify API   — Track metadata, ISRC, Artist, Album
+//   2. YouTube API   — Video metadata, Channel, Statistics
+//
+// Business Questions (Gold Layer):
+//   Q1. How many YouTube videos does each song have?
+//   Q2. How many ISRCs does each song have in Spotify?
+//
+// Dibuat: 2026-06-23
+// Format: DBML (Database Markup Language) — https://dbml.dbdiagram.io
+// =============================================================================
+
+
+// -- ##############################################################################
+// -- ##  BRONZE LAYER — Raw Data Landing (1:1 copy dari source API)
+// -- ##############################################################################
+// -- Tujuan: Menyimpan data mentah persis seperti respons API.
+// -- Tidak ada transformasi, hanya metadata ingestion (ingested_at, source,
+// -- batch_id) untuk audit trail & data lineage.
+// -- ##############################################################################
+
+
+// -- ---------------------------------------------------------------------------
+// -- Bronze: Spotify — Raw search/track response dari Spotify Web API
+// -- ---------------------------------------------------------------------------
+Table bronze_spotify_raw {
+  raw_id varchar PK [note: 'UUID — unique identifier untuk setiap record ingestion']
+  batch_id varchar [note: 'Batch run ID (Airflow DAG run_id) untuk lineage']
+  search_query varchar [note: 'Query yang dikirim ke Spotify API (contoh: TERBUAI ASMARA)']
+  search_offset int [note: 'Offset pagination dari API response']
+  search_limit int [note: 'Limit pagination dari API response']
+  search_total int [note: 'Total hasil pencarian dari API response']
+  search_href varchar [note: 'URL endpoint API yang dipanggil']
+  search_next varchar [note: 'URL untuk halaman berikutnya (null jika tidak ada)']
+  raw_json text [note: 'Full JSON response dari Spotify API, disimpan sebagai raw text/JSON']
+  ingested_at timestamp [default: `now()`, note: 'Timestamp saat data masuk ke Bronze layer']
+  source varchar [default: 'spotify_api', note: 'Sumber data']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Bronze: YouTube — Raw video response dari YouTube Data API v3
+// -- ---------------------------------------------------------------------------
+Table bronze_youtube_raw {
+  raw_id varchar PK [note: 'UUID — unique identifier untuk setiap record ingestion']
+  batch_id varchar [note: 'Batch run ID (Airflow DAG run_id) untuk lineage']
+  search_query varchar [note: 'Query yang dikirim ke YouTube API']
+  video_id varchar [note: 'YouTube Video ID dari response (sebelum deduplikasi)']
+  raw_json text [note: 'Full JSON response dari YouTube API, disimpan sebagai raw text/JSON']
+  ingested_at timestamp [default: `now()`, note: 'Timestamp saat data masuk ke Bronze layer']
+  source varchar [default: 'youtube_api', note: 'Sumber data']
+}
+
+
+// -- ##############################################################################
+// -- ##  SILVER LAYER — Cleaned, Deduplicated & Validated
+// -- ##############################################################################
+// -- Tujuan: Data sudah dibersihkan, deduplikasi, tipe data dicasting, nested
+// -- structure dipecah ke tabel relasional yang proper.
+// --
+// -- KEY INSIGHT untuk business questions:
+// --   - silver_spotify_track menyimpan 1 ISRC per row → COUNT(isrc_code) = Q2
+// --   - silver_youtube_video menyimpan 1 video per row → COUNT(video_id) = Q1
+// --   - silver_song_mapping mengelompokkan track & video ke satu "song" entity
+// --     (1 lagu bisa punya BANYAK ISRC dan BANYAK video)
+// -- ##############################################################################
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Spotify — Artists (hasil denormalisasi dari nested JSON)
+// -- ---------------------------------------------------------------------------
+Table silver_spotify_artist {
+  artist_id varchar PK [note: 'Spotify Artist ID (contoh: 4Dnbb576HeQcIV1CqcSHGh)']
+  artist_name varchar [note: 'Nama artis']
+  artist_uri varchar [note: 'Spotify URI (spotify:artist:...)']
+  artist_href varchar [note: 'Spotify API href']
+  spotify_url varchar [note: 'URL ke halaman Spotify artis']
+  ingested_at timestamp [note: 'Timestamp ingest']
+  deduplicated_at timestamp [note: 'Timestamp deduplikasi']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Spotify — Albums
+// -- ---------------------------------------------------------------------------
+Table silver_spotify_album {
+  album_id varchar PK [note: 'Spotify Album ID']
+  album_name varchar [note: 'Nama album']
+  album_type varchar [note: 'album / single / compilation']
+  release_date date [note: 'Tanggal rilis (casting dari string)']
+  release_date_precision varchar [note: 'year / month / day']
+  total_tracks int [note: 'Jumlah track dalam album']
+  album_uri varchar [note: 'Spotify URI']
+  album_href varchar [note: 'Spotify API href']
+  spotify_url varchar [note: 'URL ke halaman Spotify album']
+  is_playable boolean [note: 'Apakah album dapat diputar']
+  image_url varchar [note: 'URL cover image (resolusi 640x640)']
+  ingested_at timestamp [note: 'Timestamp ingest']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Spotify — Album Artists (junction table, many-to-many)
+// -- ---------------------------------------------------------------------------
+Table silver_spotify_album_artist {
+  album_id varchar PK [ref: > silver_spotify_album.album_id, note: 'FK ke silver_spotify_album']
+  artist_id varchar PK [ref: > silver_spotify_artist.artist_id, note: 'FK ke silver_spotify_artist']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Spotify — Tracks (SETIAP ROW = 1 ISRC)
+// -- ---------------------------------------------------------------------------
+// -- Grain: 1 row = 1 Spotify track = 1 ISRC code
+// -- Sebuah lagu bisa muncul >1 kali (ISRC berbeda = versi rekaman berbeda)
+// -- Ini adalah tabel KUNCI untuk pertanyaan "how many ISRCs per song?"
+// -- → COUNT(isrc_code) ... GROUP BY song_id (via mapping)
+// -- ---------------------------------------------------------------------------
+Table silver_spotify_track {
+  track_id varchar PK [note: 'Spotify Track ID']
+  track_name varchar [note: 'Judul lagu (original dari Spotify)']
+  isrc_code varchar [note: 'ISRC (International Standard Recording Code) — UNIQUE identifier untuk recording. INI ADALAH KUNCI UNTUK Q2.']
+  album_id varchar [ref: > silver_spotify_album.album_id, note: 'FK ke silver_spotify_album']
+  disc_number int [note: 'Nomor disc dalam album']
+  track_number int [note: 'Nomor track dalam disc']
+  duration_ms int [note: 'Durasi lagu dalam milidetik']
+  explicit boolean [note: 'Apakah lagu mengandung explicit content']
+  is_local boolean [note: 'Apakah file lokal']
+  is_playable boolean [note: 'Apakah dapat diputar']
+  track_uri varchar [note: 'Spotify URI']
+  track_href varchar [note: 'Spotify API href']
+  spotify_url varchar [note: 'URL ke halaman Spotify track']
+  ingested_at timestamp [note: 'Timestamp ingest']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Spotify — Track Artists (junction table, many-to-many)
+// -- ---------------------------------------------------------------------------
+Table silver_spotify_track_artist {
+  track_id varchar PK [ref: > silver_spotify_track.track_id, note: 'FK ke silver_spotify_track']
+  artist_id varchar PK [ref: > silver_spotify_artist.artist_id, note: 'FK ke silver_spotify_artist']
+  is_primary boolean [default: true, note: 'Apakah ini primary artist untuk track']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: YouTube — Channels
+// -- ---------------------------------------------------------------------------
+Table silver_youtube_channel {
+  channel_id varchar PK [note: 'YouTube Channel ID']
+  channel_name varchar [note: 'Nama channel (dari snippet.channelTitle) — sudah di-trim']
+  ingested_at timestamp [note: 'Timestamp ingest']
+  first_seen_at timestamp [note: 'Pertama kali channel muncul di data']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: YouTube — Videos (SETIAP ROW = 1 VIDEO)
+// -- ---------------------------------------------------------------------------
+// -- Grain: 1 row = 1 YouTube video
+// -- Sebuah lagu bisa punya BANYAK video (official MV, lyric, live performance)
+// -- Ini adalah tabel KUNCI untuk pertanyaan "how many videos per song?"
+// -- → COUNT(video_id) ... GROUP BY song_id (via mapping)
+// -- ---------------------------------------------------------------------------
+Table silver_youtube_video {
+  video_id varchar PK [note: 'YouTube Video ID']
+  channel_id varchar [ref: > silver_youtube_channel.channel_id, note: 'FK ke silver_youtube_channel']
+  title varchar [note: 'Judul video (dari snippet.title)']
+  title_artist_name varchar [note: 'Nama artis hasil ekstraksi dari judul']
+  title_song_name varchar [note: 'Judul lagu hasil ekstraksi dari judul']
+  published_at_raw varchar [note: 'Raw publishedAt string dari API (contoh: "4 years ago")']
+  published_at_parsed timestamp [note: 'Parsed publish date (jika bisa diparse)']
+  duration_raw varchar [note: 'Raw duration string (contoh: "4:05")']
+  duration_seconds int [note: 'Durasi dalam detik (hasil parsing "M:SS" → detik)']
+  view_count bigint [note: 'Jumlah views (casting dari string, hapus koma)']
+  thumbnail_url varchar [note: 'URL thumbnail default']
+  ingested_at timestamp [note: 'Timestamp ingest']
+  updated_at timestamp [note: 'Timestamp update terakhir']
+
+  indexes {
+    channel_id [name: 'idx_yt_video_channel']
+    published_at_parsed [name: 'idx_yt_video_published']
+    title_artist_name [name: 'idx_yt_video_artist']
+    title_song_name [name: 'idx_yt_video_song']
+  }
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Cross-Source — Song Mapping (KANONISASI LAGU)
+// -- ---------------------------------------------------------------------------
+// -- INI ADALAH TABEL INTI untuk menjawab kedua business question!
+// --
+// -- Grain: 1 row = 1 asosiasi antara SEBUAH LAGU (song entity) dengan
+// -- SATU track Spotify ATAU SATU video YouTube.
+// --
+// -- Karena 1 lagu bisa punya BANYAK track Spotify (ISRC berbeda) DAN BANYAK
+// -- video YouTube, maka tabel ini bersifat 1:N dari song ke tracks, dan
+// -- 1:N dari song ke videos.
+// --
+// -- Untuk Q1 (videos per song):
+// --   SELECT song_id, COUNT(DISTINCT youtube_video_id)
+// --   FROM silver_song_mapping
+// --   WHERE youtube_video_id IS NOT NULL
+// --   GROUP BY song_id;
+// --
+// -- Untuk Q2 (ISRCs per song):
+// --   SELECT ssm.song_id, COUNT(DISTINCT st.isrc_code)
+// --   FROM silver_song_mapping ssm
+// --   JOIN silver_spotify_track st ON ssm.spotify_track_id = st.track_id
+// --   WHERE ssm.spotify_track_id IS NOT NULL
+// --   GROUP BY ssm.song_id;
+// -- ---------------------------------------------------------------------------
+Table silver_song_mapping {
+  mapping_id varchar PK [note: 'UUID — unique identifier untuk setiap mapping row']
+  song_id varchar [note: 'Surrogate song ID — ini yang menyatukan track & video di bawah satu "lagu" kanonikal']
+
+  // -- Normalized identifiers untuk matching
+  song_title_normalized varchar [note: 'Judul lagu yang sudah dinormalisasi (lowercase, hapus special chars, trim)']
+  artist_name_normalized varchar [note: 'Nama artis yang sudah dinormalisasi']
+
+  // -- Spotify side (nullable — diisi jika row ini mereferensikan track Spotify)
+  spotify_track_id varchar [ref: > silver_spotify_track.track_id, note: 'FK ke silver_spotify_track. NULL jika row ini untuk video YouTube.']
+  spotify_isrc_code varchar [note: 'ISRC dari track Spotify terkait (denormalized untuk kemudahan query)']
+  spotify_track_name varchar [note: 'Nama track original dari Spotify']
+
+  // -- YouTube side (nullable — diisi jika row ini mereferensikan video YouTube)
+  youtube_video_id varchar [ref: > silver_youtube_video.video_id, note: 'FK ke silver_youtube_video. NULL jika row ini untuk track Spotify.']
+  youtube_video_title varchar [note: 'Judul video original dari YouTube']
+  youtube_channel_id varchar [ref: > silver_youtube_channel.channel_id, note: 'FK ke channel (denormalized)']
+  youtube_view_count bigint [note: 'View count (denormalized dari silver_youtube_video)']
+
+  // -- Metadata matching
+  match_confidence decimal(3,2) [note: 'Confidence score matching (0.00 — 1.00)']
+  match_method varchar [note: 'Metode matching: isrc / title_artist_fuzzy / manual']
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [note: 'Timestamp update terakhir']
+
+  indexes {
+    song_id [name: 'idx_mapping_song_id']
+    song_title_normalized [name: 'idx_mapping_title']
+    artist_name_normalized [name: 'idx_mapping_artist']
+    spotify_track_id [name: 'idx_mapping_spotify_track']
+    youtube_video_id [name: 'idx_mapping_youtube_video']
+    spotify_isrc_code [name: 'idx_mapping_isrc']
+    (spotify_track_id, youtube_video_id) [name: 'idx_mapping_composite', unique, note: 'Mencegah duplikasi asosiasi track↔video yang sama']
+  }
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Data Quality Log — hasil validasi di Silver layer
+// -- ---------------------------------------------------------------------------
+Table silver_data_quality_log {
+  check_id int PK [note: 'Auto-increment check ID']
+  table_name varchar [note: 'Nama tabel yang dicek']
+  check_type varchar [note: 'schema / missing / duplicate / anomaly / consistency']
+  status varchar [note: 'pass / fail / warn']
+  affected_rows int [note: 'Jumlah row yang terkena']
+  details text [note: 'Detail hasil pengecekan (JSON)']
+  checked_at timestamp [default: `now()`]
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Silver: Ingestion Log — audit trail untuk setiap ingestion run
+// -- ---------------------------------------------------------------------------
+Table silver_ingestion_log {
+  log_id int PK [note: 'Auto-increment log ID']
+  batch_id varchar [note: 'Batch run ID']
+  source varchar [note: 'spotify_api / youtube_api']
+  status varchar [note: 'success / failed / partial']
+  records_raw int [note: 'Jumlah record yang masuk ke Bronze']
+  records_silver int [note: 'Jumlah record yang berhasil masuk ke Silver']
+  records_rejected int [note: 'Jumlah record yang direject oleh validasi']
+  error_message text [note: 'Error message jika gagal']
+  started_at timestamp [note: 'Waktu mulai ingestion']
+  finished_at timestamp [note: 'Waktu selesai ingestion']
+  duration_seconds int [note: 'Durasi ingestion dalam detik']
+}
+
+
+// -- ##############################################################################
+// -- ##  GOLD LAYER — Business-Ready Aggregations
+// -- ##############################################################################
+// -- Tujuan: Data siap dikonsumsi untuk analisis bisnis, dashboard, dan report.
+// --
+// -- DESAIN KHUSUS untuk menjawab:
+// --   Q1. "How many YouTube videos does each song have?"
+// --   Q2. "How many ISRCs are in each song in Spotify?"
+// --
+// -- Jawaban ada di gold_dim_song (sebagai atribut agregat yang langsung bisa
+// -- di-query tanpa JOIN/GROUP BY tambahan):
+// --
+// --   SELECT song_title, artist_name, youtube_video_count, spotify_isrc_count
+// --   FROM gold_dim_song;
+// --
+// -- Grain: 1 row = 1 kanonikal lagu (sudah deduplikasi cross-platform)
+// -- ##############################################################################
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Dimension — dim_song (MASTER TABEL LAGU — langsung menjawab Q1 & Q2)
+// -- ---------------------------------------------------------------------------
+// -- Grain: 1 row = 1 lagu kanonikal (unified dari Spotify + YouTube)
+// --
+// -- Tabel ini adalah "single source of truth" untuk setiap lagu. Atribut
+// -- youtube_video_count dan spotify_isrc_count di-precompute dari
+// -- silver_song_mapping, sehingga business query menjadi SELECT langsung
+// -- tanpa perlu JOIN/GROUP BY/SUM.
+// -- ---------------------------------------------------------------------------
+Table gold_dim_song {
+  song_id varchar PK [note: 'Surrogate key — dari silver_song_mapping.song_id']
+  song_title varchar [note: 'Judul lagu (standardized, title case)']
+  artist_name varchar [note: 'Nama artis utama']
+  album_name varchar [note: 'Nama album (dari Spotify, nullable jika hanya ada di YouTube)']
+  release_date date [note: 'Tanggal rilis']
+  cover_image_url varchar [note: 'URL cover image dari Spotify (nullable)']
+
+  // -- =========================================================================
+  // -- JAWABAN BUSINESS QUESTIONS langsung tersedia di sini:
+  // -- =========================================================================
+  youtube_video_count int [default: 0, note: '✅ Q1: Jumlah video YouTube untuk lagu ini. Pre-computed dari silver_song_mapping.']
+  spotify_isrc_count int [default: 0, note: '✅ Q2: Jumlah ISRC code dari Spotify untuk lagu ini. Pre-computed dari silver_song_mapping + silver_spotify_track.']
+  // -- =========================================================================
+
+  // -- Platform presence flags
+  has_spotify boolean [default: false, note: 'Apakah lagu tersedia di Spotify']
+  has_youtube boolean [default: false, note: 'Apakah lagu tersedia di YouTube']
+
+  // -- Aggregate metrics (opsional, untuk enrichment)
+  total_youtube_views bigint [default: 0, note: 'Total akumulasi views dari semua video YouTube terkait']
+  total_spotify_tracks int [default: 0, note: 'Jumlah track Spotify (sinonim dengan spotify_isrc_count)']
+  unique_youtube_channels int [default: 0, note: 'Jumlah channel unik yang meng-upload video lagu ini']
+  total_platforms int [default: 0, note: 'Jumlah platform (0, 1, atau 2) tempat lagu ini muncul']
+
+  // -- Metadata
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [note: 'Timestamp update terakhir — refresh dari Silver layer']
+
+  indexes {
+    song_title [name: 'idx_dim_song_title']
+    artist_name [name: 'idx_dim_song_artist']
+    (song_title, artist_name) [name: 'idx_dim_song_title_artist', unique, note: 'Mencegah duplikasi lagu dengan judul+artis yang sama']
+    youtube_video_count [name: 'idx_dim_song_yt_count', note: 'Mempercepat query filter/sort by video count (Q1)']
+    spotify_isrc_count [name: 'idx_dim_song_isrc_count', note: 'Mempercepat query filter/sort by ISRC count (Q2)']
+  }
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Dimension — dim_artist
+// -- ---------------------------------------------------------------------------
+Table gold_dim_artist {
+  artist_id varchar PK [note: 'Spotify Artist ID (jika ada) atau surrogate key']
+  artist_name varchar [note: 'Nama artis (standardized)']
+  spotify_url varchar [note: 'URL Spotify artist']
+  youtube_channel_id varchar [ref: > silver_youtube_channel.channel_id, note: 'FK ke YouTube channel (jika ada)']
+  youtube_channel_name varchar [note: 'Nama YouTube channel']
+
+  // -- Aggregate metrics (pre-computed)
+  total_songs int [default: 0, note: 'Total lagu dari artis ini di gold_dim_song']
+  total_youtube_videos int [default: 0, note: 'Total video YouTube dari artis ini']
+  total_youtube_views bigint [default: 0, note: 'Akumulasi total views YouTube']
+
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+
+  indexes {
+    artist_name [name: 'idx_dim_artist_name']
+  }
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Dimension — dim_album
+// -- ---------------------------------------------------------------------------
+Table gold_dim_album {
+  album_id varchar PK [note: 'Spotify Album ID atau surrogate key']
+  album_name varchar [note: 'Nama album']
+  album_type varchar [note: 'single / album / compilation']
+  release_date date [note: 'Tanggal rilis']
+  total_tracks int [note: 'Jumlah track dalam album']
+  cover_image_url varchar [note: 'URL cover image']
+  artist_name varchar [note: 'Primary artist untuk album']
+
+  // -- Aggregate metrics (pre-computed)
+  songs_with_youtube int [default: 0, note: 'Jumlah lagu di album ini yang punya video YouTube']
+  total_youtube_views bigint [default: 0, note: 'Total views YouTube untuk semua lagu di album ini']
+
+  created_at timestamp [default: `now()`]
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Dimension — dim_date (calendar dimension)
+// -- ---------------------------------------------------------------------------
+Table gold_dim_date {
+  date_id date PK [note: 'Tanggal dalam format YYYY-MM-DD']
+  year int [note: 'Tahun']
+  quarter int [note: 'Kuartal (1-4)']
+  month int [note: 'Bulan (1-12)']
+  month_name varchar [note: 'Nama bulan (January, February, ...)']
+  week_of_year int [note: 'Minggu ke berapa dalam setahun']
+  day_of_week int [note: 'Hari dalam seminggu (1=Monday, 7=Sunday)']
+  day_name varchar [note: 'Nama hari (Monday, Tuesday, ...)']
+  is_weekend boolean [note: 'Apakah weekend']
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Fact — fact_song_daily_snapshot (time-series metrics per lagu per hari)
+// -- ---------------------------------------------------------------------------
+// -- Grain: 1 row = 1 lagu × 1 tanggal
+// -- Tabel ini untuk analisis tren (opsional). Metrics utama (Q1 & Q2) tetap
+// -- menggunakan gold_dim_song untuk query snapshot terbaru.
+// -- ---------------------------------------------------------------------------
+Table gold_fact_song_daily_snapshot {
+  snapshot_id varchar PK [note: 'Surrogate key — UUID']
+  song_id varchar [ref: > gold_dim_song.song_id, note: 'FK ke gold_dim_song']
+  date_id date [ref: > gold_dim_date.date_id, note: 'FK ke gold_dim_date']
+
+  // -- Snapshot metrics (di-capture setiap hari)
+  youtube_video_count int [default: 0, note: 'Snapshot: jumlah video YouTube untuk lagu ini pada tanggal ini']
+  spotify_isrc_count int [default: 0, note: 'Snapshot: jumlah ISRC Spotify untuk lagu ini pada tanggal ini']
+  total_youtube_views bigint [default: 0, note: 'Snapshot: total views YouTube pada tanggal ini']
+  unique_youtube_channels int [default: 0, note: 'Snapshot: jumlah channel unik']
+
+  // -- Delta from previous day
+  youtube_video_count_change int [note: 'Perubahan jumlah video vs hari sebelumnya']
+  spotify_isrc_count_change int [note: 'Perubahan jumlah ISRC vs hari sebelumnya']
+  youtube_views_change bigint [note: 'Perubahan total views vs hari sebelumnya']
+
+  captured_at timestamp [default: `now()`]
+
+  indexes {
+    (song_id, date_id) [name: 'idx_fact_song_snapshot_composite', unique]
+    date_id [name: 'idx_fact_song_snapshot_date']
+  }
+}
+
+
+// -- ---------------------------------------------------------------------------
+// -- Gold: Fact — fact_ingestion_summary (monitoring pipeline harian)
+// -- ---------------------------------------------------------------------------
+Table gold_fact_ingestion_summary {
+  summary_id varchar PK [note: 'Surrogate key — UUID']
+  date_id date [ref: > gold_dim_date.date_id, note: 'FK ke gold_dim_date']
+  source varchar [note: 'spotify_api / youtube_api']
+
+  total_raw_records int [default: 0, note: 'Total record masuk Bronze']
+  total_silver_records int [default: 0, note: 'Total record berhasil ke Silver']
+  total_rejected int [default: 0, note: 'Total record direject']
+  success_rate_pct decimal(5,2) [note: 'Success rate dalam persen']
+  avg_ingestion_duration_seconds int [note: 'Rata-rata durasi ingestion']
+
+  total_checks_run int [default: 0, note: 'Total data quality checks dijalankan']
+  checks_passed int [default: 0, note: 'Jumlah check yang pass']
+  checks_failed int [default: 0, note: 'Jumlah check yang fail']
+
+  last_updated_at timestamp [default: `now()`]
+
+  indexes {
+    (date_id, source) [name: 'idx_fact_ingestion_composite', unique]
+  }
+}
+
+
+// -- ##############################################################################
+// -- ##  QUERY PATTERNS — Bagaimana ERD ini menjawab business questions
+// -- ##############################################################################
+
+// -- Q1: "How many YouTube videos does each song have?"
+// -- ✅ JAWABAN: SELECT langsung dari gold_dim_song
+// --    SELECT song_title, artist_name, youtube_video_count
+// --    FROM gold_dim_song
+// --    WHERE has_youtube = true
+// --    ORDER BY youtube_video_count DESC;
+// --
+// --    Jika perlu detail videonya (drill-down), JOIN ke silver:
+// --    SELECT ds.song_title, yv.video_id, yv.title, yv.view_count
+// --    FROM gold_dim_song ds
+// --    JOIN silver_song_mapping ssm ON ds.song_id = ssm.song_id
+// --    JOIN silver_youtube_video yv ON ssm.youtube_video_id = yv.video_id
+// --    WHERE ds.song_id = '<song_id>';
+
+// -- Q2: "How many ISRCs are in each song in Spotify?"
+// -- ✅ JAWABAN: SELECT langsung dari gold_dim_song
+// --    SELECT song_title, artist_name, spotify_isrc_count
+// --    FROM gold_dim_song
+// --    WHERE has_spotify = true
+// --    ORDER BY spotify_isrc_count DESC;
+// --
+// --    Jika perlu detail ISRC-nya (drill-down), JOIN ke silver:
+// --    SELECT ds.song_title, st.track_name, st.isrc_code, st.album_id
+// --    FROM gold_dim_song ds
+// --    JOIN silver_song_mapping ssm ON ds.song_id = ssm.song_id
+// --    JOIN silver_spotify_track st ON ssm.spotify_track_id = st.track_id
+// --    WHERE ds.song_id = '<song_id>';
+
+
+// -- ##############################################################################
+// -- ##  RELATIONSHIPS
+// -- ##############################################################################
+
+// -- Silver layer relationships
+// Ref: silver_spotify_album_artist.album_id > silver_spotify_album.album_id
+// Ref: silver_spotify_album_artist.artist_id > silver_spotify_artist.artist_id
+// Ref: silver_spotify_track.album_id > silver_spotify_album.album_id
+// Ref: silver_spotify_track_artist.track_id > silver_spotify_track.track_id
+// Ref: silver_spotify_track_artist.artist_id > silver_spotify_artist.artist_id
+
+// Ref: silver_youtube_video.channel_id > silver_youtube_channel.channel_id
+
+// -- Silver cross-source mapping (1 lagu → N tracks, 1 lagu → N videos)
+// Ref: silver_song_mapping.spotify_track_id > silver_spotify_track.track_id
+// Ref: silver_song_mapping.youtube_video_id > silver_youtube_video.video_id
+// Ref: silver_song_mapping.youtube_channel_id > silver_youtube_channel.channel_id
+
+// -- Gold layer relationships
+// Ref: gold_fact_song_daily_snapshot.song_id > gold_dim_song.song_id
+// Ref: gold_fact_song_daily_snapshot.date_id > gold_dim_date.date_id
+
+// Ref: gold_fact_ingestion_summary.date_id > gold_dim_date.date_id
+
+// Ref: gold_dim_artist.youtube_channel_id > silver_youtube_channel.channel_id
+
+
+// -- ##############################################################################
+// -- ##  ETL FLOW — Bagaimana data mengalir antar layer
+// -- ##############################################################################
+// --
+// -- BRONZE → SILVER (per source):
+// --   bronze_spotify_raw → parse JSON → silver_spotify_artist
+// --                                     → silver_spotify_album
+// --                                     → silver_spotify_album_artist
+// --                                     → silver_spotify_track (+ ISRC!)
+// --                                     → silver_spotify_track_artist
+// --
+// --   bronze_youtube_raw  → parse JSON → silver_youtube_channel
+// --                                     → silver_youtube_video
+// --
+// -- SILVER → GOLD (cross-source + agregasi):
+// --   1. silver_spotify_track + silver_youtube_video
+// --      → silver_song_mapping  (matching by normalized title + artist name)
+// --      → gold_dim_song         (song kanonikal, dengan aggregate counts)
+// --
+// --   2. silver_spotify_artist + silver_youtube_channel
+// --      → gold_dim_artist       (unified artist profile)
+// --
+// --   3. silver_spotify_album
+// --      → gold_dim_album        (album profile + aggregate)
+// --
+// --   4. silver_ingestion_log + silver_data_quality_log
+// --      → gold_fact_ingestion_summary  (harian monitoring)
+// --
+// --   5. gold_dim_song (daily snapshot)
+// --      → gold_fact_song_daily_snapshot  (time-series history, optional)

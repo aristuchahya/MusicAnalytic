@@ -1,0 +1,255 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+          "format": 1,
+          "rawSql": "SELECT song_title, youtube_video_count\nFROM ${BQ_PROJECT}.gold.gold_dim_song\nWHERE has_youtube = true\nORDER BY youtube_video_count DESC\nLIMIT 20",
+          "refId": "Q1"
+        }
+      ],
+      "title": "✅ Q1: Top 20 Songs — YouTube Video Count",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+          "format": 1,
+          "rawSql": "SELECT song_title, spotify_isrc_count\nFROM ${BQ_PROJECT}.gold.gold_dim_song\nWHERE has_spotify = true\nORDER BY spotify_isrc_count DESC\nLIMIT 20",
+          "refId": "Q2"
+        }
+      ],
+      "title": "✅ Q2: Top 20 Songs — Spotify ISRC Count",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 12 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+          "format": 1,
+          "rawSql": "SELECT\n  COUNT(*) AS total_songs,\n  SUM(youtube_video_count) AS total_videos,\n  SUM(spotify_isrc_count) AS total_isrcs,\n  SUM(total_youtube_views) AS total_views\nFROM ${BQ_PROJECT}.gold.gold_dim_song",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 Summary Stats",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 12 },
+      "id": 4,
+      "options": {
+        "displayLabels": ["name", "percent"],
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+          "format": 1,
+          "rawSql": "SELECT\n  CASE\n    WHEN has_spotify AND has_youtube THEN 'Both'\n    WHEN has_spotify THEN 'Spotify Only'\n    WHEN has_youtube THEN 'YouTube Only'\n  END AS platform,\n  COUNT(*) AS count\nFROM ${BQ_PROJECT}.gold.gold_dim_song\nGROUP BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "🌐 Platform Presence",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "total_youtube_views" },
+            "properties": [{ "id": "displayName", "value": "Total YouTube Views" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "youtube_video_count" },
+            "properties": [{ "id": "displayName", "value": "Video Count" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "spotify_isrc_count" },
+            "properties": [{ "id": "displayName", "value": "ISRC Count" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 12 },
+      "id": 5,
+      "options": { "showHeader": true, "sortBy": [{ "desc": true, "displayName": "Total YouTube Views" }] },
+      "targets": [
+        {
+          "datasource": { "type": "google-bigquery-datasource", "uid": "${DS_BIGQUERY_GOLD}" },
+          "format": 1,
+          "rawSql": "SELECT\n  song_title,\n  artist_name,\n  youtube_video_count,\n  spotify_isrc_count,\n  total_youtube_views,\n  unique_youtube_channels\nFROM ${BQ_PROJECT}.gold.gold_dim_song\nORDER BY total_youtube_views DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "📋 Song Detail — All Metrics",
+      "type": "table"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["music", "medallion", "spotify", "youtube"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "BigQuery - Gold", "value": "BigQuery - Gold" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "DS_BIGQUERY_GOLD",
+        "options": [],
+        "query": "google-bigquery-datasource",
+        "refresh": 1,
+        "regex": "/BigQuery - Gold/",
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": false, "text": "${BQ_PROJECT}", "value": "${BQ_PROJECT}" },
+        "hide": 2,
+        "label": "Project",
+        "name": "BQ_PROJECT",
+        "query": "${BQ_PROJECT}",
+        "type": "constant"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Jakarta",
+  "title": "Music Analytics — Medallion Dashboard",
+  "uid": "music-analytics-gold",
+  "version": 0,
+  "weekStart": "monday"
+}
