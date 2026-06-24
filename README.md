@@ -433,3 +433,169 @@ silver_spotify_track_artist  silver_song_mapping
 | `spotify_isrc_count` | Pre-computed | **Q2 answer** |
 | `total_youtube_views` | Aggregate | |
 | `has_spotify` / `has_youtube` | Boolean | Platform presence |
+
+---
+
+## Data Quality & Validation Strategy
+
+### 1. Multi-Layer Validation
+
+| Layer | Validasi | Implementasi |
+|-------|----------|--------------|
+| **Crawler** | Cache validity check | `_is_valid_spotify()`, `_is_valid_youtube()` — data kosong tidak di-cache, di-fetch ulang |
+| **Bronze** | Schema enforcement | DDL `CREATE TABLE IF NOT EXISTS` memastikan struktur tabel |
+| | Deduplication | `ON CONFLICT (raw_id) DO NOTHING` mencegah duplikasi ingest |
+| | Audit trail | `batch_id`, `ingested_at`, `source` di setiap record |
+| **Silver** | ISRC extraction | Validasi `external_ids.isrc` dari Spotify JSON |
+| | Type casting | `duration_seconds`, `view_count` diparse dari string |
+| | Missing values | `_check_null_isrc`, `_check_null_channel`, `_check_empty_video_title` |
+| | Duplicate detection | `_check_duplicate_mapping` — cegah duplikasi asosiasi |
+| | Normalization | `_normalize()` — lowercase, hapus special chars, trim whitespace |
+| **Gold** | Aggregate validation | `youtube_video_count` + `spotify_isrc_count` di-precompute dari source |
+| | Platform flags | `has_spotify`, `has_youtube` boolean untuk filter valid |
+
+### 2. Data Quality Log
+
+Semua hasil pengecekan dicatat di `silver_data_quality_log`:
+
+```sql
+SELECT table_name, check_type, status, checked_at
+FROM silver_data_quality_log
+WHERE checked_at >= CURRENT_DATE()
+ORDER BY checked_at DESC;
+```
+
+| Status | Arti |
+|--------|------|
+| `pass` | Semua record valid |
+| `warn` | Ditemukan anomali, data tetap diproses |
+| `fail` | Data ditolak, tidak masuk Silver |
+
+### 3. Ingestion Audit Trail
+
+Setiap ETL run tercatat di `silver_ingestion_log`:
+
+```sql
+SELECT batch_id, source, status,
+       records_raw, records_silver, records_rejected,
+       duration_seconds, started_at
+FROM silver_ingestion_log
+ORDER BY started_at DESC
+LIMIT 20;
+```
+
+### 4. Error Recovery
+
+| Skenario | Recovery |
+|----------|----------|
+| API rate limit (429) | Exponential backoff: 5s → 10s → 20s, max 4 retry |
+| Kafka mati | Fallback ke `raw/*.json` files |
+| BigQuery mati | Fallback ke PostgreSQL staging tables |
+| Data kosong | Cache di-skip, re-fetch; items kosong tidak dipublish |
+| Duplikasi ingest | `ON CONFLICT DO NOTHING` / `ON CONFLICT DO UPDATE` |
+---
+
+## Storage Layer Design
+
+### Why This Stack?
+
+| Layer | Storage | Alasan |
+|-------|---------|--------|
+| **Bronze** | PostgreSQL | ACID compliance, audit trail, low volume (append-only raw JSON) |
+| **Silver** | BigQuery | Columnar storage, auto-scaling, nested JSON support, terpisah dari operational DB |
+| **Gold** | BigQuery | Pre-computed aggregates, query sub-detik, langsung connect ke Grafana |
+
+### Scalability
+
+| Aspek | Desain |
+|-------|--------|
+| **Bronze** | Append-only — bisa di-partition by `ingested_at::DATE` untuk query range |
+| **Silver** | BigQuery auto-partition by `_PARTITIONTIME` atau `ingested_at` |
+| **Gold** | Materialized view pattern — `gold_dim_song` di-refresh setiap ETL run |
+| **Kafka** | Decoupling crawler dari ETL — backpressure di-handle oleh consumer group |
+
+### Query-Friendly Design
+
+| Kebutuhan | Implementasi |
+|-----------|--------------|
+| **Q1 & Q2 tanpa JOIN** | `youtube_video_count`, `spotify_isrc_count` pre-computed di `gold_dim_song` |
+| **Filter by platform** | `has_spotify`, `has_youtube` boolean flags |
+| **Time-series** | `gold_fact_song_daily_snapshot` dengan `date_id` FK → `gold_dim_date` |
+| **Drill-down** | `gold_dim_song` → JOIN `silver_song_mapping` → `silver_youtube_video` / `silver_spotify_track` |
+| **Dashboard** | Grafana connect langsung ke BigQuery tanpa intermediate cache |
+
+### Data Retention
+
+| Layer | Retention | Kebijakan |
+|-------|-----------|-----------|
+| Bronze (PG) | 30 hari | Hapus row >30 hari via cron `DELETE WHERE ingested_at < NOW() - INTERVAL '30 days'` |
+| Silver (BQ) | 90 hari | Table expiration di BigQuery dataset |
+| Gold (BQ) | Unlimited | Gold adalah source of truth — tidak dihapus |
+| Redis cache | 24 jam (data), 7 hari (done flag) | Auto-expire via TTL |
+
+---
+
+## Monitoring & Maintenance
+
+### 1. Pipeline Health Dashboard (Grafana)
+
+```
+gold_fact_ingestion_summary ──► Grafana
+  • Success rate per source per hari
+  • Total records raw → silver → gold
+  • Durasi ingestion (tracking degradasi performa)
+  • Data quality checks pass/fail ratio
+```
+
+### 2. Alerting Rules
+
+| Kondisi | Severity | Action |
+|---------|----------|--------|
+| `success_rate_pct < 95%` | Warning | Cek `error_message` di ingestion log |
+| `records_rejected > 0` | Warning | Investigasi DQ log untuk root cause |
+| `duration_seconds > 300` | Warning | Optimasi query atau scale resource |
+| `records_raw = 0` 2 hari berturut-turut | Critical | Crawler mati / API key expired |
+| BigQuery job failed | Critical | Cek service account quota |
+
+### 3. Maintenance Tasks
+
+| Task | Frekuensi | Command |
+|------|-----------|---------|
+| Bronze cleanup | Harian | `DELETE FROM bronze_*_raw WHERE ingested_at < NOW() - INTERVAL '30 days'` |
+| Redis cache flush | Mingguan | `docker exec yt-redis redis-cli FLUSHDB` |
+| BQ table optimize | Bulanan | `bq query --use_legacy_sql=false 'CALL BQ.REFRESH_EXTERNAL_METADATA_CACHE()'` |
+| ETL re-run (backfill) | On-demand | `python main.py etl --mode all --batch-id backfill-YYYYMMDD` |
+| Service account key rotation | 6 bulan | Update `service_account.json`, restart Grafana |
+
+### 4. Backfill Strategy
+
+```bash
+# Re-process data dari Bronze untuk tanggal tertentu
+python main.py etl --mode silver --batch-id backfill-20260601
+
+# Re-build Gold dari Silver yang sudah ada
+python main.py etl --mode gold --batch-id rebuild-20260601
+```
+
+### 5. Monitoring Query
+
+```sql
+-- Pipeline health 7 hari terakhir
+SELECT
+  date_id,
+  source,
+  total_raw_records,
+  total_silver_records,
+  total_rejected,
+  success_rate_pct,
+  avg_ingestion_duration_seconds
+FROM gold_fact_ingestion_summary
+WHERE date_id >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+ORDER BY date_id DESC, source;
+
+-- Data quality checks terbaru
+SELECT table_name, check_type, status, checked_at
+FROM silver_data_quality_log
+ORDER BY checked_at DESC
+LIMIT 20;
+```

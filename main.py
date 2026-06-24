@@ -8,31 +8,6 @@ def run_engine(**kwargs):
             c = BaseCrawl(**kwargs)
             asyncio.run(c.main())
         
-        if kwargs.get("mode") == "idx":
-            from controllers.idx.ingest import IngestDaily
-            c = IngestDaily(**kwargs)
-            asyncio.run(c.main())
-        
-        if kwargs.get("mode") == "idx-historical":
-            from controllers.idx.ingest import IngestHistorical
-            c = IngestHistorical(**kwargs)
-            asyncio.run(c.main())
-        
-        if kwargs.get("mode") == "ingest-profile":
-            from controllers.idx.ingest import IngestProfile
-            c = IngestProfile(**kwargs)
-            asyncio.run(c.main())
-        
-        if kwargs.get("mode") == "pusher-yt":
-            from controllers.pusher.pusher_yt import PusherYT
-            c = PusherYT(**kwargs)
-            asyncio.run(c.pusher())
-        
-        if kwargs.get("mode") == "ingest-stockbit":
-            from controllers.stockbit.base import StockbitBase
-            c = StockbitBase(**kwargs)
-            asyncio.run(c.main())
-        
         if kwargs.get("mode") == "music":
             from controllers.crawling.base import BaseCrawl
             c = BaseCrawl(**kwargs)
