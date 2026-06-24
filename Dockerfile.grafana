@@ -1,0 +1,5 @@
+FROM grafana/grafana-enterprise:latest
+
+# Install plugins at build time (not runtime) — avoids race condition with provisioning
+RUN grafana cli plugins install grafana-bigquery-datasource
+RUN grafana cli plugins install hamedkarbasi93-kafka-datasource || true

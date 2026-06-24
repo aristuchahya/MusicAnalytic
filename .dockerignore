@@ -23,7 +23,6 @@ test*.py
 
 # Config & secrets (loaded at runtime or via environment)
 config.yaml
-service_account.json
 *.pem
 *.key
 

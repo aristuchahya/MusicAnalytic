@@ -110,19 +110,18 @@ services:
   # Grafana — Dashboard untuk BigQuery Gold Layer
   # ------------------------------------------------------------------
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana
     container_name: yt-grafana
     restart: unless-stopped
     environment:
-      GF_INSTALL_PLUGINS: google-bigquery-datasource
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: http://localhost:3000
       GF_USERS_DEFAULT_THEME: dark
-      # BigQuery
+      # BigQuery (credentials in grafana/datasources/bigquery.yml)
       BQ_PROJECT: ${BQ_PROJECT}
-      BQ_CLIENT_EMAIL: ${BQ_CLIENT_EMAIL}
-      BQ_PRIVATE_KEY: ${BQ_PRIVATE_KEY}
       # PostgreSQL
       PG_HOST: ${PG_HOST:-host.docker.internal}
       PG_PORT: ${PG_PORT:-5432}

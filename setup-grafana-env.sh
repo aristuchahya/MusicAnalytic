@@ -59,10 +59,8 @@ print(c['kafka'].get('bootstrap_servers', 'kafka:29092'))
 
 cat > .env <<EOF
 # Auto-generated — $(date)
-# BigQuery
+# BigQuery (credentials in grafana/datasources/bigquery.yml)
 BQ_PROJECT=${BQ_PROJECT}
-BQ_CLIENT_EMAIL=${BQ_CLIENT_EMAIL}
-BQ_PRIVATE_KEY=${BQ_PRIVATE_KEY}
 
 # PostgreSQL
 PG_HOST=${PG_HOST}
@@ -79,11 +77,33 @@ GRAFANA_USER=admin
 GRAFANA_PASSWORD=admin
 EOF
 
-echo "✅ .env generated"
+# --- Write BigQuery provisioning with actual private key ---
+BQ_PRIVATE_KEY_RAW=$(python3 -c "import json; print(json.load(open('service_account.json'))['private_key'])")
+
+cat > grafana/datasources/bigquery.yml <<BQEOF
+apiVersion: 1
+
+datasources:
+  - name: BigQuery - Gold
+    type: grafana-bigquery-datasource
+    access: proxy
+    jsonData:
+      authenticationType: jwt
+      clientEmail: ${BQ_CLIENT_EMAIL}
+      defaultProject: ${BQ_PROJECT}
+      tokenUri: https://oauth2.googleapis.com/token
+    secureJsonData:
+      privateKey: |
+$(echo "${BQ_PRIVATE_KEY_RAW}" | sed 's/^/        /')
+    editable: true
+BQEOF
+
+echo "✅ .env + provisioning files generated"
 echo ""
 echo "BigQuery:"
 echo "   project = ${BQ_PROJECT}"
 echo "   email   = ${BQ_CLIENT_EMAIL}"
+echo "   key     = **** (written to grafana/datasources/bigquery.yml)"
 echo ""
 echo "PostgreSQL:"
 echo "   host = ${PG_HOST}:${PG_PORT}"
@@ -93,5 +113,5 @@ echo ""
 echo "Kafka:"
 echo "   broker = ${KAFKA_BROKER}"
 echo ""
-echo "Run: docker compose up -d grafana"
+echo "Run: docker compose build grafana && docker compose up -d grafana"
 echo "Open: http://localhost:3000"

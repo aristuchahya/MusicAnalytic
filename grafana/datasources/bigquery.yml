@@ -2,13 +2,41 @@ apiVersion: 1
 
 datasources:
   - name: BigQuery - Gold
-    type: google-bigquery-datasource
+    type: grafana-bigquery-datasource
     access: proxy
     jsonData:
       authenticationType: jwt
-      clientEmail: ${BQ_CLIENT_EMAIL}
-      defaultProject: ${BQ_PROJECT}
-      processingLocation: us-central1
+      clientEmail: bigquery-music@big-query-project-498207.iam.gserviceaccount.com
+      defaultProject: big-query-project-498207
+      tokenUri: https://oauth2.googleapis.com/token
     secureJsonData:
-      privateKey: ${BQ_PRIVATE_KEY}
+      privateKey: |
+        -----BEGIN PRIVATE KEY-----
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCyedruPZxxE0tU
+        KfvChWA1A6PlxVgG4I4vzhKPvJ3uWGpbl5bXprH6GugnV+m/IrVs5gdbQ/Fki29K
+        fO5IC5kpMyLwbz32DoqA+AqkLYf8Ui4mVNe0mE/khyR/RNB/oUPN6nB+C4QyoOlw
+        XZy5DXJoY6um007Ja+2aBiO+f8p0Nd+UIX6I99gsGdwOC9HCscLvrDUFdGcLEkCq
+        W5y1cA/NIgHmjX7yJ79Je4nv9vafychyb2ERnJ3fVWpCOk1uJ0esPoMkY3AV22TR
+        SVvQVspMIr6WYNq/BE9lQnsIWpCu/XH6P7jTvI2GK0wQ0Kr1IZe5aJ0QCbj4zro/
+        c8OmWu1nAgMBAAECggEAGsMA3AZrBd2Rxw4AjTt4oJpqIhMETwuu5mYtDFaJC+tA
+        D3nciXuaZllQhE2/ZAStVaXsZnf6o0vxJSc0h6MNlUrwq0LS9KlbhVksJ1AYevJL
+        rz27ln3cRPUquNa1uN2SkDbeJVhOu1S7jDjNPkZQ6GxBmeNHhhZj61uOUotQ7TnC
+        sJHfIa8U+GGK+/tIzdiI/pD6v+ldz0tPQ3CGbcjWjawDxHWoFNotK0ccsE77Kl/5
+        ku+m884gLkCQo0X+HIGZ7/05UTF/OI3oM6n8D6vTG9gTGldISn0SMINfI+vLLnsT
+        D4SxINL0Td1aCscQYn+X1kfS6YNJVEjdtJtdMt6AQQKBgQDXq6zRX9AY9hvdMcNh
+        aN/cxWapusS2aBLT1cnr/XlaINFzUrBMI2y6TRLdG6+JCT/Eu4LMJ330yaSsaXk0
+        7kzqxTsvIr4yuzRj1sa/aUkFgcJA9GrIRzxkqY35lZkvItaw/SnEr0lV0yClGtSM
+        agK9Gyv4tkxXOnVS5ncJzO57IQKBgQDT2aT0wnU7CzQejOz0WKOIdUxcdJlLLZw8
+        VJ0am0Zjzv/XKyEZNmfQJLOzshVEpzU4jDH1IkHG9Ht/MvOLvBBGt8dnUz20F32J
+        mXdxPtxN4Lk/Lak0yFijBstpyWAoQT+/l61KkKmU/deRuejCaeFkRe8ViC7WLNni
+        yhjxpM8fhwKBgQC6tUTHfcsJ0QYOWCZtDf2/gqV+CtKBl1e1TD+ira2A+ShaThuR
+        zpkyL8dE49LzL66lAjAZzZaddHO7TxQ/Xo34MQcrp0hBYw/X3vfwfZVZzxv8X5yS
+        Bhmii6b9iyUySVbTolemjplOU5jPVorrhFsam4tVpXwxh8pKGnqzYVaUAQKBgHGF
+        7LZYShfUvh4s6IFbym5CZSQaO1ck3tcZhIKQeJzdfQ2hiAAJvoG0WTPPF0SN0aA2
+        yEKTE+p4coFMHWRg59vteYZt/d+2wsfsnCvsQoPdC4fGgSjOv2jFKFXM2qFXrcCO
+        mAcgFC/KAy2NESS1NlnUe/Tu4CJXMH8uS0WaSn+bAoGAS1Wg8XRz2XxGYJHMMFON
+        Ay9LfomO8AE3HBadntOmkpihIpHNeu1CGy5syTYIt8y7+3Nxq2k0l6k/AYn36Mw1
+        7JUhzcmMJW0CD8SnCzIrjsHw0oLQHxsfXxVZdwhKy67zOoYScIWnWRGWTwFFGHYQ
+        2krCw5jyvJ+DfgHSyv21Xq4=
+        -----END PRIVATE KEY-----
     editable: true
