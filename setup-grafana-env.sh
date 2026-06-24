@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate .env file untuk Grafana BigQuery datasource dari service_account.json
+# Generate .env file untuk Grafana datasources dari service_account.json + config.ini
 # Usage: ./setup-grafana-env.sh
 
 if [ ! -f "service_account.json" ]; then
@@ -8,31 +8,90 @@ if [ ! -f "service_account.json" ]; then
     exit 1
 fi
 
-# Extract values from service_account.json
+# --- BigQuery ---
 BQ_PROJECT=$(python3 -c "import json; print(json.load(open('service_account.json'))['project_id'])")
 BQ_CLIENT_EMAIL=$(python3 -c "import json; print(json.load(open('service_account.json'))['client_email'])")
 BQ_PRIVATE_KEY=$(python3 -c "
 import json
 key = json.load(open('service_account.json'))['private_key']
-# Escape newlines for .env (replace literal \n with \\n)
 print(key.replace(chr(10), '\\\\n'))
 ")
 
+# --- PostgreSQL (from config.ini) ---
+PG_HOST=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['postgresql'].get('host', 'localhost'))
+")
+PG_PORT=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['postgresql'].get('port', '5432'))
+")
+PG_USER=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['postgresql']['username'])
+")
+PG_PASSWORD=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['postgresql']['password'])
+")
+PG_DBNAME=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['postgresql']['dbname'])
+")
+
+# --- Kafka ---
+KAFKA_BROKER=$(python3 -c "
+import configparser
+c = configparser.ConfigParser()
+c.read('config.ini')
+print(c['kafka'].get('bootstrap_servers', 'kafka:29092'))
+")
+
 cat > .env <<EOF
-# Auto-generated from service_account.json — $(date)
+# Auto-generated — $(date)
 # BigQuery
 BQ_PROJECT=${BQ_PROJECT}
 BQ_CLIENT_EMAIL=${BQ_CLIENT_EMAIL}
 BQ_PRIVATE_KEY=${BQ_PRIVATE_KEY}
 
-# Grafana admin (ubah password setelah login pertama)
+# PostgreSQL
+PG_HOST=${PG_HOST}
+PG_PORT=${PG_PORT}
+PG_USER=${PG_USER}
+PG_PASSWORD=${PG_PASSWORD}
+PG_DBNAME=${PG_DBNAME}
+
+# Kafka
+KAFKA_BROKER=${KAFKA_BROKER}
+
+# Grafana admin
 GRAFANA_USER=admin
 GRAFANA_PASSWORD=admin
 EOF
 
 echo "✅ .env generated"
-echo "   BQ_PROJECT      = ${BQ_PROJECT}"
-echo "   BQ_CLIENT_EMAIL = ${BQ_CLIENT_EMAIL}"
+echo ""
+echo "BigQuery:"
+echo "   project = ${BQ_PROJECT}"
+echo "   email   = ${BQ_CLIENT_EMAIL}"
+echo ""
+echo "PostgreSQL:"
+echo "   host = ${PG_HOST}:${PG_PORT}"
+echo "   db   = ${PG_DBNAME}"
+echo "   user = ${PG_USER}"
+echo ""
+echo "Kafka:"
+echo "   broker = ${KAFKA_BROKER}"
 echo ""
 echo "Run: docker compose up -d grafana"
 echo "Open: http://localhost:3000"

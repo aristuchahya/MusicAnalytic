@@ -119,17 +119,27 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: http://localhost:3000
       GF_USERS_DEFAULT_THEME: dark
-      # BigQuery datasource env vars (dari .env file)
+      # BigQuery
       BQ_PROJECT: ${BQ_PROJECT}
       BQ_CLIENT_EMAIL: ${BQ_CLIENT_EMAIL}
       BQ_PRIVATE_KEY: ${BQ_PRIVATE_KEY}
+      # PostgreSQL
+      PG_HOST: ${PG_HOST:-host.docker.internal}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      PG_DBNAME: ${PG_DBNAME}
+      # Kafka
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:29092}
     ports:
       - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources/bigquery.yml:/etc/grafana/provisioning/datasources/bigquery.yml
+      - ./grafana/datasources/postgresql.yml:/etc/grafana/provisioning/datasources/postgresql.yml
       - ./grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ./grafana/dashboards/music-analytics-gold.json:/etc/grafana/provisioning/dashboards/music-analytics-gold.json
+      - ./grafana/dashboards/pipeline-monitoring.json:/etc/grafana/provisioning/dashboards/pipeline-monitoring.json
     networks:
       - yt-network
 
