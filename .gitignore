@@ -14,3 +14,4 @@ test*.*
 service_account.json
 .env
 deployment/
+bigquery.yml
